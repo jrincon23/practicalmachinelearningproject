@@ -1,0 +1,126 @@
+---
+title: 'Practical Machine Learning Course Project: Prediction Assignment Writeup'
+author: "Jhonathan Rincón"
+date: "3/3/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## Downloading and loading the data
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+```{r, echo=FALSE}
+library(ggplot2)
+library(caret)
+library(randomForest)
+library(e1071)
+library(gbm)
+library(survival)
+library(splines)
+library(plyr)
+```
+```{r}
+data_folder <- "data"
+train_data_file_name <- paste0(data_folder,"/","pml-training.csv")
+test_data_file_name <- paste0(data_folder,"/","pml-testing.csv")
+train_data_src_url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+test_data_src_url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+if(!file.exists(data_folder)){
+    dir.create(data_folder)
+}
+if(!file.exists(train_data_file_name)){
+    download.file(train_data_src_url,train_data_file_name)
+}
+if(!file.exists(test_data_file_name)){
+    download.file(test_data_src_url,test_data_file_name)
+}
+
+training_set <- read.csv(train_data_file_name, row.names = 1)
+validation_set <- read.csv(test_data_file_name, row.names = 1)
+```
+## Partitioning the data
+
+activities to perform:
+- partitioning the data on training (70%) and testing (30%): the pml-training.csv will be partitioned on training and testing and the pml-testing.csv set will be used later as validation sample.
+- remove the full na columns
+```{r}
+training_set <- training_set[,-c(1:6)]
+columns <- !apply(training_set, 2, function(x) sum(is.na(x)) > 0.9 || sum(x=="")>0.9)
+training_set<- training_set[,columns]
+training_set$classe <- as.factor(training_set$classe)
+set.seed(23)
+training_partition <- createDataPartition(y=training_set$classe, p=0.7,list=FALSE)
+training <- training_set[training_partition,]
+testing <- training_set[-training_partition,]
+```
+## Models
+
+We will use 3 different models to check which one provides the best out of sample accuracy, the models used will be:
+1. Recursive partitioning and regression trees (rpart)
+2. Random forest decision trees (rf)
+3. Linear discrimination analysis (lda)
+
+# Cross validation
+cross validation will be handled on each model with K=3 contained in the cross_validation variables.
+
+```{r}
+cross_validation <- trainControl(method="cv",number=3)
+model_rpart <- train(classe~.,data=training,method="rpart",trControl=cross_validation)
+model_rf <- train(classe~.,data=training,method="rf",trControl=cross_validation)
+model_lda <- train(classe~.,data=training,method="lda",trControl=cross_validation)
+```
+
+## Model assesment
+```{r}
+pred_rpart <- predict(model_rpart,testing)
+matrix_rpart <- confusionMatrix(pred_rpart,testing$classe)
+pred_rf <- predict(model_rf,testing)
+matrix_rf <- confusionMatrix(pred_rf,testing$classe)
+pred_lda <- predict(model_lda,newdata=testing)
+matrix_lda <- confusionMatrix(pred_lda,testing$classe)
+accuracy <- data.frame(Model=c("rpart","rf","lda"),Accuracy=rbind(matrix_rpart$overall[1],matrix_rf$overall[1],matrix_lda$overall[1]))
+accuracy
+```
+Based on the accuracy the Random forest (rf) outperform the Recursive partitioning and regression trees and Linear discrimination analysis models, giving an accuracy of 99.4%. so this will be the one we will be using. the full confusion matrix for random forest is as follows
+
+```{r}
+print(matrix_rf)
+
+```
+
+the random forest model includes the following 10 features as the most important while predicting.
+
+```{r}
+top_variables <- varImp(model_rf)
+plot(top_variables, main = "Top 10 variables importance",top=10)
+```
+
+## Validation predictions
+
+predictions for validation set on pml-testing.csv
+
+```{r}
+validation_prediction <- predict(model_rf,validation_set)
+validation_results <- data.frame(observation=validation_set$problem_id,classe_prediction=validation_prediction)
+print(validation_results)
+```
+
+## Conclusions
+
+Using the provided data, a model with random forest was fitted with a high degree of accuracy in predicting the testing partition observations. this model was used for final calculations.
+Random forest model has an accuracy of 99.4%
+
+
